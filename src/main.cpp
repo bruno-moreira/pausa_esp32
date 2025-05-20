@@ -1,65 +1,77 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
 #include <MFRC522v2.h>
 #include <MFRC522DriverSPI.h>
-// #include <MFRC522DriverI2C.h>
 #include <MFRC522DriverPinSimple.h>
 #include <MFRC522Debug.h>
 #include <Wire.h>
 
-// Learn more about using SPI/I2C or check the pin assigment for your board: https://github.com/OSSLibraries/Arduino_MFRC522v2#pin-layout
-MFRC522DriverPinSimple ss_pin(5);
+// WiFi config
+const char* ssid = "Henet Casa";
+const char* password = "moreira1994";
 
-MFRC522DriverSPI driver{ss_pin}; // Create SPI driver
-// MFRC522DriverI2C driver{}; // Create I2C driver
+// RFID
+MFRC522DriverPinSimple ss_pin(5);
+MFRC522DriverSPI driver{ss_pin};
 MFRC522 mfrc522{driver};
 
 void setup()
 {
-    Serial.begin(9600);
-    while (!Serial)
-        ;
+    Serial.begin(115200);
+    WiFi.begin(ssid, password);
+    Serial.print("Conectando ao Wi-Fi");
+    while (WiFi.status() != WL_CONNECTED)
+    {
+        delay(500);
+        Serial.print(".");
+    }
+    Serial.println("\nWi-Fi conectado!");
+
     mfrc522.PCD_Init();
-    MFRC522Debug::PCD_DumpVersionToSerial(mfrc522, Serial); // Show details of PCD - MFRC522 Card Reader details.
-    Serial.println(F("Scan PICC to see UID, SAK, type, and data blocks..."));
+    MFRC522Debug::PCD_DumpVersionToSerial(mfrc522, Serial);
+    Serial.println(F("Aproxime o cartão RFID..."));
 }
 
 void loop()
 {
-
-    if (!mfrc522.PICC_IsNewCardPresent())
-    {
+ if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial())
         return;
-    }
 
-    if (!mfrc522.PICC_ReadCardSerial())
-    {
-        return;
-    }
-
-    String tag_rfid_dec = "";
     String tag_rfid_hex = "";
-
     for (byte i = 0; i < mfrc522.uid.size; i++)
     {
         if (mfrc522.uid.uidByte[i] < 0x10)
-        {
             tag_rfid_hex += "0";
-            tag_rfid_dec += "0";
-        }
         tag_rfid_hex += String(mfrc522.uid.uidByte[i], HEX);
-        tag_rfid_dec += String(mfrc522.uid.uidByte[i], DEC);
     }
 
+    tag_rfid_hex.toUpperCase();
     Serial.println("TAG HEX: " + tag_rfid_hex);
-    Serial.println("TAG DEC MSB: " + tag_rfid_dec);
 
-    uint32_t uidLittleEndian = 0;
-    for (byte i = 0; i < mfrc522.uid.size; i++)
+    // Envia via HTTP GET
+    if (WiFi.status() == WL_CONNECTED)
     {
-        uidLittleEndian |= (mfrc522.uid.uidByte[i] << (8 * i));
+        HTTPClient http;
+        String url = "http://192.168.1.158:3000/api/praca/insert?cracha_rfid=" + tag_rfid_hex + "&pausa_id=1";
+        http.begin(url);
+        int httpCode = http.GET();
+
+        if (httpCode > 0)
+        {
+            String payload = http.getString();
+            Serial.println("Resposta do servidor: " + payload);
+        }
+        else
+        {
+            Serial.println("Erro na requisição HTTP: " + http.errorToString(httpCode));
+        }
+
+        http.end();
+    }
+    else
+    {
+        Serial.println("Wi-Fi não conectado.");
     }
 
-    Serial.print("TAG DEC LSB): ");
-    Serial.println(uidLittleEndian);
-
-    delay(2000);
+    delay(3000);  // Aguardar para evitar múltiplas leituras seguidas
 }
